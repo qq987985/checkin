@@ -3,7 +3,7 @@
 一个可以在网页中配置的多站点自动签到工具。无需把 Cookie 写进 Docker Compose：启动容器后，在管理页面填写签到接口、登录凭据、每日次数与时间即可。
 
 - **仓库**：[qq987985/checkin](https://github.com/qq987985/checkin)
-- **镜像**：`ghcr.io/qq987985/checkin:latest`，固定版本 `ghcr.io/qq987985/checkin:2.1.2`
+- **镜像**：`ghcr.io/qq987985/checkin:latest`，固定版本 `ghcr.io/qq987985/checkin:2.1.3`
 - **平台**：Linux amd64 / arm64，适用于对应架构的服务器、NAS 和 Docker Desktop。
 - **运行依赖**：Python 标准库，无第三方 Python 依赖。
 
@@ -153,6 +153,31 @@ services:
 
 完整 cURL、Cookie 和 Token 可能包含账号凭据，请直接在自己的管理页面填写，不要提交到公开仓库。
 
+### 验证方式怎么判断？
+
+先登录目标网站 → Network（网络）清空记录 → 手动签到一次 → 找到实际签到请求 → Headers（请求头）→ **Request Headers（请求标头）**，按原请求填写。不要把 Response Headers（响应头）当作请求凭据。
+
+| 实际请求中的内容 | 工具里如何填写 |
+| --- | --- |
+| `Cookie: session=…; other=…` | 选择 Cookie，填冒号后完整值，包括键值对和分号；不含 `Cookie:`，也不要复制响应的 Set-Cookie |
+| `Authorization: Bearer abc…` | 选择 Bearer Token，只填 `abc…`，不含 `Bearer ` 前缀 |
+| `X-API-Key: abc…` 或 `token: abc…` | 选择 API Key，请求头名称和值均照原请求填写 |
+| `Authorization: Basic …` 等其他方案 | 选择「无需验证 / 使用自定义请求头」，在高级配置里填写完整请求头名称和值 |
+| 同时需要多个验证头 | 在高级配置中填写完整 JSON；或选择一种验证方式并补充其他不同名称的请求头。同名请求头以选定验证方式生成的值为准 |
+| 请求头里没有凭据 | 继续检查 URL 查询参数、Payload 和接口文档，不能直接认定无需验证 |
+
+自定义请求头结构示例（仅演示）：
+
+```json
+{"Cookie":"session=你的值","Authorization":"Basic 你的值"}
+```
+
+如果凭据在 URL 查询参数里，保留完整 URL；如果在请求体里，照原格式填写请求体并核对 Content-Type。部分接口同时依赖 URL、请求头和请求体，不能只填其中一项。「无需验证 / 使用自定义请求头」也可用于手工配置认证，不表示接口一定免登录。
+
+保存后可点击「立即签到」真实执行并检查运行记录。401 / 403 可能与认证、权限、签名或设备校验有关，不能仅凭状态码确定原因；200 也不代表业务成功。按实际响应配置成功规则，「待确认」时人工核对。凭据过期后从新请求重新获取。
+
+豆包 App 等接口若涉及动态签名、设备校验、一次性参数或验证码，复制静态 Token 可能仍无法执行。Cookie、Token、含凭据的 URL 和完整 cURL 请只在自己的管理页面填写，避免公开；编辑已有凭据时留空会保留原值。
+
 ### 次数与时间如何配合？
 
 例如目标每天 **2 次**，时间设置 `08:30,12:30,20:30`：
@@ -189,7 +214,7 @@ services:
 
 从 2.0 升级到 2.1 时，更新 Compose 和 `.env`，将旧 `ADMIN_TOKEN` 换为账号密码、域名及 Cookie 设置，保留原 `data/`。
 
-升级至 2.1.2 后，容器内外默认端口均改为 `8505`。如已有 `.env`，请将 `WEB_PORT` 改为 `8505`；Lucky 后端目标地址也同步改为 `http://签到主机地址:8505`。
+升级至 2.1.3 后，容器内外默认端口均改为 `8505`。如已有 `.env`，请将 `WEB_PORT` 改为 `8505`；Lucky 后端目标地址也同步改为 `http://签到主机地址:8505`。
 
 ## 更新和常用命令
 
@@ -206,7 +231,7 @@ docker compose logs -f --tail=100 checkin
 docker compose down
 ```
 
-如需固定版本，将镜像标签 `latest` 改为 `2.1.2`。
+如需固定版本，将镜像标签 `latest` 改为 `2.1.3`。
 
 ### 从 Lingxi-Check-in 迁移
 
