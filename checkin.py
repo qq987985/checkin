@@ -1,4 +1,4 @@
-"""多站点签到服务：python checkin.py，默认 http://127.0.0.1:8765。"""
+"""多站点签到服务：python checkin.py，默认 http://127.0.0.1:8505。"""
 import hashlib
 from http.cookies import SimpleCookie
 import hmac
@@ -416,7 +416,7 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(400, {'error': '配置无效，请检查 URL、验证凭据、时间和 JSON 格式'})
 
 if __name__ == '__main__':
-    host, port = os.getenv('HOST', '127.0.0.1'), int(os.getenv('PORT', '8765'))
+    host, port = os.getenv('HOST', '127.0.0.1'), int(os.getenv('PORT', '8505'))
     if bool(ADMIN_USERNAME) != bool(ADMIN_PASSWORD) or ADMIN_USERNAME and len(ADMIN_PASSWORD) < 12:
         raise SystemExit('请同时设置 ADMIN_USERNAME 和至少 12 位的 ADMIN_PASSWORD')
     if PUBLIC_URL and (urlsplit(PUBLIC_URL).scheme != 'https' or not urlsplit(PUBLIC_URL).hostname or urlsplit(PUBLIC_URL).path):

@@ -29,20 +29,20 @@ jobs:
       - name: Build and smoke-test container
         run: |
           docker build -t checkin:smoke .
-          docker run -d --name checkin-smoke -e ADMIN_USERNAME=ci-admin -e ADMIN_PASSWORD=ci-test-password-123456 -e COOKIE_SECURE=false -p 127.0.0.1:18765:8765 checkin:smoke
+          docker run -d --name checkin-smoke -e ADMIN_USERNAME=ci-admin -e ADMIN_PASSWORD=ci-test-password-123456 -e COOKIE_SECURE=false -p 127.0.0.1:18505:8505 checkin:smoke
           python - <<'PY'
           import json, time
           from urllib.request import Request, urlopen, build_opener, HTTPCookieProcessor
           from http.cookiejar import CookieJar
           for attempt in range(30):
               try:
-                  with urlopen('http://127.0.0.1:18765/', timeout=2) as response:
+                  with urlopen('http://127.0.0.1:18505/', timeout=2) as response:
                       assert '签到'.encode() in response.read()
                   opener = build_opener(HTTPCookieProcessor(CookieJar()))
-                  request = Request('http://127.0.0.1:18765/api/login', data=json.dumps({'username':'ci-admin','password':'ci-test-password-123456'}).encode(), headers={'Content-Type':'application/json'})
+                  request = Request('http://127.0.0.1:18505/api/login', data=json.dumps({'username':'ci-admin','password':'ci-test-password-123456'}).encode(), headers={'Content-Type':'application/json'})
                   with opener.open(request, timeout=2) as response:
                       assert json.load(response)['ok']
-                  with opener.open('http://127.0.0.1:18765/api/config', timeout=2) as response:
+                  with opener.open('http://127.0.0.1:18505/api/config', timeout=2) as response:
                       assert json.load(response)['sites'] == []
                   print('Container startup and authenticated API passed')
                   break

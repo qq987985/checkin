@@ -7,11 +7,11 @@ services:
     restart: unless-stopped
     ports:
       # 默认仅允许本机访问；远程服务器可通过 SSH 转发或 HTTPS 反向代理访问。
-      - "${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8765}:8765"
+      - "${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8505}:8505"
     environment:
       TZ: Asia/Shanghai
       HOST: 0.0.0.0
-      PORT: "8765"
+      PORT: "8505"
       ADMIN_USERNAME: ${ADMIN_USERNAME:?请先在.env中设置管理账号}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请先在.env中设置至少12位的管理密码}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
@@ -20,7 +20,7 @@ services:
       # Cookie、Token、站点配置与签到记录均保存于此，升级时保留该目录。
       - ./data:/app/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/', timeout=5).close()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8505/', timeout=5).close()"]
       interval: 30s
       timeout: 10s
       start_period: 10s

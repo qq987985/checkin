@@ -39,7 +39,7 @@ ADMIN_PASSWORD=请替换为你自己的至少12位强密码
 COOKIE_SECURE=true
 PUBLIC_URL=https://checkin.example.com
 BIND_ADDRESS=127.0.0.1
-WEB_PORT=8765
+WEB_PORT=8505
 ```
 
 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 是本工具的管理账号密码，不是签到网站的账号密码。请自行设置密码，不存在内置默认密码。`.env` 为本机部署配置，不提交到仓库；密码含 `$`、`#` 等字符时，按 Compose `.env` 语法使用单引号包裹。建议使用密码管理器生成长随机密码。
@@ -59,14 +59,14 @@ docker compose ps
 | Web 服务 | 创建 HTTPS 服务，选择对应域名证书 |
 | 子规则类型 | 反向代理 |
 | 前端域名 | 自己的域名，如 `checkin.example.com` |
-| 后端目标地址 | Lucky 与签到同机且可访问宿主机回环时填 `http://127.0.0.1:8765` |
-| 其他部署方式 | Lucky 在另一台设备或桥接容器内时，填可达的签到主机内网 IP，如 `http://192.168.1.10:8765`；同时将 `.env` 的 `BIND_ADDRESS` 改为该主机内网 IP |
+| 后端目标地址 | Lucky 与签到同机且可访问宿主机回环时填 `http://127.0.0.1:8505` |
+| 其他部署方式 | Lucky 在另一台设备或桥接容器内时，填可达的签到主机内网 IP，如 `http://192.168.1.10:8505`；同时将 `.env` 的 `BIND_ADDRESS` 改为该主机内网 IP |
 
 将 `.env` 的 `PUBLIC_URL` 设置为实际访问的 HTTPS 地址（包括非标准端口，不含末尾 `/`），保留 `COOKIE_SECURE=true`，重建容器后，通过该 HTTPS 地址打开页面并输入账号密码。Lucky 终止 HTTPS，后端继续使用 HTTP 即可；无需 WebSocket 配置。保留 Cookie、Set-Cookie 和浏览器 Origin 请求头，不要给登录/API 接口添加缓存。
 
-公网只开放 Lucky 的 HTTPS 入口；后端 8765 端口限制为本机或 Lucky 的内网地址访问。不同设备上的 Lucky 无法通过自己的 `127.0.0.1` 访问签到主机，必须填写可达内网地址。配置项目可参考 [Lucky 官方 Web 服务说明](https://lucky666.cn/docs/modules/web/)。
+公网只开放 Lucky 的 HTTPS 入口；后端 8505 端口限制为本机或 Lucky 的内网地址访问。不同设备上的 Lucky 无法通过自己的 `127.0.0.1` 访问签到主机，必须填写可达内网地址。配置项目可参考 [Lucky 官方 Web 服务说明](https://lucky666.cn/docs/modules/web/)。
 
-**仅在本机 HTTP 测试时**，将 `COOKIE_SECURE=false`、`PUBLIC_URL=` 留空，再运行 `docker compose up -d`，通过 http://127.0.0.1:8765 登录。开启 Secure 时请从 HTTPS 域名访问，不要用内网 HTTP 地址排查登录状态。
+**仅在本机 HTTP 测试时**，将 `COOKIE_SECURE=false`、`PUBLIC_URL=` 留空，再运行 `docker compose up -d`，通过 http://127.0.0.1:8505 登录。开启 Secure 时请从 HTTPS 域名访问，不要用内网 HTTP 地址排查登录状态。
 
 ### 登录会话
 
@@ -89,11 +89,11 @@ services:
     restart: unless-stopped
     ports:
       # 默认仅允许本机访问；远程服务器可通过 SSH 转发或 HTTPS 反向代理访问。
-      - "${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8765}:8765"
+      - "${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8505}:8505"
     environment:
       TZ: Asia/Shanghai
       HOST: 0.0.0.0
-      PORT: "8765"
+      PORT: "8505"
       ADMIN_USERNAME: ${ADMIN_USERNAME:?请先在.env中设置管理账号}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请先在.env中设置至少12位的管理密码}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
@@ -102,7 +102,7 @@ services:
       # Cookie、Token、站点配置与签到记录均保存于此，升级时保留该目录。
       - ./data:/app/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/', timeout=5).close()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8505/', timeout=5).close()"]
       interval: 30s
       timeout: 10s
       start_period: 10s
@@ -189,6 +189,8 @@ services:
 
 从 2.0 升级到 2.1 时，更新 Compose 和 `.env`，将旧 `ADMIN_TOKEN` 换为账号密码、域名及 Cookie 设置，保留原 `data/`。
 
+升级至 2.1.2 后，容器内外默认端口均改为 `8505`。如已有 `.env`，请将 `WEB_PORT` 改为 `8505`；Lucky 后端目标地址也同步改为 `http://签到主机地址:8505`。
+
 ## 更新和常用命令
 
 ```bash
@@ -225,7 +227,7 @@ cd checkin
 TZ=Asia/Shanghai python3 checkin.py
 ```
 
-打开 http://127.0.0.1:8765 。本机开发默认绑定回环地址，可免登录；对外监听应设置 `ADMIN_USERNAME` 和至少 12 位 `ADMIN_PASSWORD`。旧 `ADMIN_TOKEN` 仅在未启用账号时兼容，公网部署请迁移到账号模式。可通过 `HOST`、`PORT`、`DATA_DIR`、`TZ` 调整监听地址、端口、数据目录与时区。
+打开 http://127.0.0.1:8505 。本机开发默认绑定回环地址，可免登录；对外监听应设置 `ADMIN_USERNAME` 和至少 12 位 `ADMIN_PASSWORD`。旧 `ADMIN_TOKEN` 仅在未启用账号时兼容，公网部署请迁移到账号模式。可通过 `HOST`、`PORT`、`DATA_DIR`、`TZ` 调整监听地址、端口、数据目录与时区。
 
 本地构建容器：
 
