@@ -52,7 +52,7 @@ jobs:
                       raise
                   time.sleep(1)
           PY
-          docker exec checkin-smoke python -c "from Crypto.Cipher import AES; import cookiecloud"
+          docker exec checkin-smoke python -c "from Crypto.Cipher import AES; import cookiecloud; import notifications"
           docker stop checkin-smoke
       - name: Read version
         id: version

@@ -2,6 +2,7 @@
 import hashlib
 from http.cookies import SimpleCookie
 from cookiecloud import CloudError, fetch_cookies, cookie_header, validate_config as validate_cloud
+from notifications import PushError, send_bark, validate_bark
 import hmac
 import json
 import os
@@ -239,10 +240,8 @@ def run_site(site_id):
             bark = CONFIG.get('bark_url', '')
         if bark:
             try:
-                payload = json.dumps({'title': site['name'] + '签到', 'body': message}).encode()
-                with urlopen(Request(bark, data=payload, headers={'Content-Type': 'application/json'}), timeout=10):
-                    pass
-            except Exception:
+                send_bark(bark, site['name'] + '签到', message)
+            except (ValueError, PushError):
                 pass
         return entry
     finally:
@@ -316,6 +315,9 @@ class Handler(BaseHTTPRequestHandler):
             if ADMIN_USERNAME and session is None:
                 return self.respond(401, {'error': '登录已过期，请重新登录'})
             return self.respond(200, {**public_config(), 'csrf': session['csrf'] if session else CSRF})
+        if path == '/api/settings':
+            with LOCK:
+                return self.respond(200, {'bark_url': CONFIG.get('bark_url', '')})
         if path == '/api/state':
             with LOCK:
                 return self.respond(200, {**STATE, 'today': datetime.now().strftime('%Y-%m-%d'), 'server_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 'timezone': os.getenv('TZ', '系统时区')})
@@ -432,12 +434,20 @@ class Handler(BaseHTTPRequestHandler):
                         CONFIG['cookiecloud'] = cloud
                     write_json(DATA / 'config.json', CONFIG)
                 return self.respond(200, {'ok': True})
-            if path == '/api/settings':
+            if path in ('/api/settings', '/api/notifications/test'):
                 bark = payload.get('bark_url')
+                if bark is not None:
+                    bark = validate_bark(bark)
+                if path == '/api/notifications/test':
+                    with LOCK:
+                        target = CONFIG.get('bark_url', '') if bark is None else bark
+                    try:
+                        message = send_bark(target, '签到 · 测试推送', '这是一条测试通知，通知通道已发起测试。时间：' + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                        return self.respond(200, {'ok': True, 'message': message + ' 本次测试未保存设置。'})
+                    except (ValueError, PushError) as error:
+                        return self.respond(400, {'error': str(error)})
                 with LOCK:
                     if bark is not None:
-                        if bark and (urlsplit(bark).scheme != 'https' or not urlsplit(bark).hostname):
-                            raise ValueError('Bark 地址必须是 HTTPS URL')
                         CONFIG['bark_url'] = bark
                     write_json(DATA / 'config.json', CONFIG)
                 return self.respond(200, {'ok': True})
