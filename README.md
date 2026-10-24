@@ -3,7 +3,7 @@
 一个可以在网页中配置的多站点自动签到工具。无需把 Cookie 写进 Docker Compose：启动容器后，在管理页面填写签到接口、登录凭据、每日次数与时间即可。
 
 - **仓库**：[qq987985/checkin](https://github.com/qq987985/checkin)
-- **镜像**：`ghcr.io/qq987985/checkin:latest`，固定版本 `ghcr.io/qq987985/checkin:2.2.0`
+- **镜像**：`ghcr.io/qq987985/checkin:latest`，固定版本 `ghcr.io/qq987985/checkin:2.2.1`
 - **平台**：Linux amd64 / arm64，适用于对应架构的服务器、NAS 和 Docker Desktop。
 - **运行依赖**：Python 3.10+，CookieCloud 本机 AES 解密使用 PyCryptodome（Docker 镜像已内置）。
 
@@ -35,7 +35,7 @@ curl -fsSLo .env https://raw.githubusercontent.com/qq987985/checkin/main/.env.ex
 
 ```dotenv
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=请替换为你自己的至少12位强密码
+ADMIN_PASSWORD=请替换为你自己的至少8位强密码
 COOKIE_SECURE=true
 PUBLIC_URL=https://checkin.example.com
 BIND_ADDRESS=127.0.0.1
@@ -95,7 +95,7 @@ services:
       HOST: 0.0.0.0
       PORT: "8505"
       ADMIN_USERNAME: ${ADMIN_USERNAME:?请先在.env中设置管理账号}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请先在.env中设置至少12位的管理密码}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请先在.env中设置至少8位的管理密码}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       PUBLIC_URL: ${PUBLIC_URL:-}
     volumes:
@@ -250,7 +250,7 @@ docker compose logs -f --tail=100 checkin
 docker compose down
 ```
 
-如需固定版本，将镜像标签 `latest` 改为 `2.2.0`。
+如需固定版本，将镜像标签 `latest` 改为 `2.2.1`。
 
 ### 从 Lingxi-Check-in 迁移
 
@@ -273,7 +273,7 @@ python3 -m venv .venv
 TZ=Asia/Shanghai .venv/bin/python checkin.py
 ```
 
-打开 http://127.0.0.1:8505 。本机开发默认绑定回环地址，可免登录；对外监听应设置 `ADMIN_USERNAME` 和至少 12 位 `ADMIN_PASSWORD`。旧 `ADMIN_TOKEN` 仅在未启用账号时兼容，公网部署请迁移到账号模式。可通过 `HOST`、`PORT`、`DATA_DIR`、`TZ` 调整监听地址、端口、数据目录与时区。
+打开 http://127.0.0.1:8505 。本机开发默认绑定回环地址，可免登录；对外监听应设置 `ADMIN_USERNAME` 和至少 8 位 `ADMIN_PASSWORD`。旧 `ADMIN_TOKEN` 仅在未启用账号时兼容，公网部署请迁移到账号模式。可通过 `HOST`、`PORT`、`DATA_DIR`、`TZ` 调整监听地址、端口、数据目录与时区。
 
 本地构建容器：
 

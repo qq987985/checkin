@@ -13,7 +13,7 @@ services:
       HOST: 0.0.0.0
       PORT: "8505"
       ADMIN_USERNAME: ${ADMIN_USERNAME:?请先在.env中设置管理账号}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请先在.env中设置至少12位的管理密码}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请先在.env中设置至少8位的管理密码}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       PUBLIC_URL: ${PUBLIC_URL:-}
     volumes:

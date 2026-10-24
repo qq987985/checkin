@@ -449,8 +449,8 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     host, port = os.getenv('HOST', '127.0.0.1'), int(os.getenv('PORT', '8505'))
-    if bool(ADMIN_USERNAME) != bool(ADMIN_PASSWORD) or ADMIN_USERNAME and len(ADMIN_PASSWORD) < 12:
-        raise SystemExit('请同时设置 ADMIN_USERNAME 和至少 12 位的 ADMIN_PASSWORD')
+    if bool(ADMIN_USERNAME) != bool(ADMIN_PASSWORD) or ADMIN_USERNAME and len(ADMIN_PASSWORD) < 8:
+        raise SystemExit('请同时设置 ADMIN_USERNAME 和至少 8 位的 ADMIN_PASSWORD')
     if PUBLIC_URL and (urlsplit(PUBLIC_URL).scheme != 'https' or not urlsplit(PUBLIC_URL).hostname or urlsplit(PUBLIC_URL).path):
         raise SystemExit('PUBLIC_URL 应为不含路径的 HTTPS 公网域名，如 https://checkin.example.com')
     if host not in ('127.0.0.1', 'localhost', '::1') and not ADMIN_USERNAME and len(ADMIN_TOKEN) < 16:
