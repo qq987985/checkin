@@ -3,7 +3,7 @@
 一个可以在网页中配置的多站点自动签到工具。无需把 Cookie 写进 Docker Compose：启动容器后，在管理页面填写签到接口、登录凭据、每日次数与时间即可。
 
 - **仓库**：[qq987985/checkin](https://github.com/qq987985/checkin)
-- **镜像**：`ghcr.io/qq987985/checkin:latest`，固定版本 `ghcr.io/qq987985/checkin:2.1.1`
+- **镜像**：`ghcr.io/qq987985/checkin:latest`，固定版本 `ghcr.io/qq987985/checkin:2.1.2`
 - **平台**：Linux amd64 / arm64，适用于对应架构的服务器、NAS 和 Docker Desktop。
 - **运行依赖**：Python 标准库，无第三方 Python 依赖。
 
@@ -134,13 +134,20 @@ services:
 
 ### 签到地址在哪里获取？
 
-网页中点击输入框下方的「签到地址在哪里获取？」可查看说明。
+网页中点击输入框下方的「签到地址和请求方法在哪里获取？」可查看说明。
 
-**网页签到：**电脑浏览器登录 → 打开开发者工具的 Network（网络）面板 → 选择 Fetch/XHR → 手动点击「签到」→ 找到对应请求 → 在 Headers 中复制 Request URL 和 Request Method。验证 Cookie / Token 位于 Request Headers，请求体位于 Payload。必要时切回 All 查看全部请求。可右键该请求选择 Copy as cURL，便于核对完整参数。
+**签到地址就是 `Request URL`，不是浏览器地址栏中的网址。完整步骤如下：**
 
-**请求方法怎么确定：**点击实际签到请求 → Headers（请求头）→ General（常规）→ 查看 `Request Method`。显示 `POST` 就选 POST，显示 `GET` 就选 GET，PUT / PATCH 同理。`Request URL` 才是签到地址，方法和地址必须从同一条请求复制；不能根据网址猜方法，也不能照用默认 POST。
-
-找不到对应请求时，先清空网络记录再点击签到，检查新出现的 Fetch/XHR 请求，并在 Response / Preview 中确认返回了签到结果。checkin、sign 等名称仅作查找线索，不要选统计上报或 OPTIONS 预检请求。
+1. **登录并打开签到页面：**在电脑浏览器登录自己的账号，进入能手动点击「签到」的页面。先不要点击签到。
+2. **打开开发者工具：**按 F12（Mac 可按 ⌥⌘I），也可右键网页选择「检查」，打开 Network（网络）面板。
+3. **准备记录请求：**选择 Fetch/XHR，点击网络面板的清除按钮，清空已有记录；保持面板打开。若签到会跳转页面，可勾选 Preserve log（保留日志）。
+4. **手动签到一次：**回到页面点击「签到」，查看网络面板刚新增的请求。没有看到请求时，切回 All（全部）重新查看。
+5. **确认真正的签到请求：**逐条查看新请求的 Response（响应）或 Preview（预览），找到返回签到结果的那一条。checkin、sign 等名称只作线索；不要选图片、统计上报或 OPTIONS 预检请求。
+6. **复制签到地址 URL：**打开这条请求的 Headers（请求头）→ General（常规），找到 Request URL，复制完整地址（包括 ? 后的查询参数），粘贴到本工具的「签到接口 URL」。不要复制浏览器地址栏，也不要只复制请求列表里的短名称。
+7. **选择对应的请求方法：**在同一条请求的 General（常规）里查看 Request Method：显示 POST 就选择 POST，显示 GET 就选择 GET，PUT / PATCH 同理。URL 和方法必须来自同一条请求，不能根据网址猜测。
+8. **填写验证凭据：**在 Request Headers（请求标头）中查看：Cookie 填到 Cookie 验证；Authorization: Bearer 后面的值填到 Bearer Token 验证（不含 Bearer 前缀）；其他 API Key 按原来的请求头名称和值填写。需要多个验证请求头时，在高级配置里填写 JSON 对象。
+9. **核对请求体和结果规则：**如原请求有 Payload（请求载荷），按实际格式填写高级配置里的请求体，并核对 Content-Type；再根据实际响应设置成功字段或关键词。没有请求体就选择「无请求体」。
+10. **保存并确认执行结果：**设置每日次数与时间后保存。可点击「立即签到」测试，这会实际发送签到请求；若当天已手动签到，可能返回「已签到」。检查运行记录；「待确认」时先核对响应规则，不要直接当作成功。
 
 **豆包 App：**需要从手机 App 实际签到时的请求取得 URL、请求头和请求体。火山方舟模型 API Key 不等于豆包 App 登录凭据。需要动态签名、设备参数或验证码的接口不能仅靠静态 Token 配置完成。
 
@@ -197,7 +204,7 @@ docker compose logs -f --tail=100 checkin
 docker compose down
 ```
 
-如需固定版本，将镜像标签 `latest` 改为 `2.1.1`。
+如需固定版本，将镜像标签 `latest` 改为 `2.1.2`。
 
 ### 从 Lingxi-Check-in 迁移
 
