@@ -18,7 +18,9 @@ jobs:
           python-version: '3.12'
       - name: Test application and Compose
         env:
-          ADMIN_TOKEN: ci-test-admin-token
+          ADMIN_USERNAME: ci-admin
+          ADMIN_PASSWORD: ci-test-password-123456
+          COOKIE_SECURE: "false"
         run: |
           python -m unittest discover -s tests -v
           python -m py_compile checkin.py
@@ -27,16 +29,20 @@ jobs:
       - name: Build and smoke-test container
         run: |
           docker build -t checkin:smoke .
-          docker run -d --name checkin-smoke -e ADMIN_TOKEN=ci-test-admin-token -p 127.0.0.1:18765:8765 checkin:smoke
+          docker run -d --name checkin-smoke -e ADMIN_USERNAME=ci-admin -e ADMIN_PASSWORD=ci-test-password-123456 -e COOKIE_SECURE=false -p 127.0.0.1:18765:8765 checkin:smoke
           python - <<'PY'
           import json, time
-          from urllib.request import Request, urlopen
+          from urllib.request import Request, urlopen, build_opener, HTTPCookieProcessor
+          from http.cookiejar import CookieJar
           for attempt in range(30):
               try:
                   with urlopen('http://127.0.0.1:18765/', timeout=2) as response:
                       assert '签到'.encode() in response.read()
-                  request = Request('http://127.0.0.1:18765/api/config', headers={'Authorization': 'Bearer ci-test-admin-token'})
-                  with urlopen(request, timeout=2) as response:
+                  opener = build_opener(HTTPCookieProcessor(CookieJar()))
+                  request = Request('http://127.0.0.1:18765/api/login', data=json.dumps({'username':'ci-admin','password':'ci-test-password-123456'}).encode(), headers={'Content-Type':'application/json'})
+                  with opener.open(request, timeout=2) as response:
+                      assert json.load(response)['ok']
+                  with opener.open('http://127.0.0.1:18765/api/config', timeout=2) as response:
                       assert json.load(response)['sites'] == []
                   print('Container startup and authenticated API passed')
                   break

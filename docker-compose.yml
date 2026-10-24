@@ -12,7 +12,10 @@ services:
       TZ: Asia/Shanghai
       HOST: 0.0.0.0
       PORT: "8765"
-      ADMIN_TOKEN: ${ADMIN_TOKEN:?请先在.env中设置至少16位的随机管理令牌}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?请先在.env中设置管理账号}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请先在.env中设置至少12位的管理密码}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      PUBLIC_URL: ${PUBLIC_URL:-}
     volumes:
       # Cookie、Token、站点配置与签到记录均保存于此，升级时保留该目录。
       - ./data:/app/data

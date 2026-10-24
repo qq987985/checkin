@@ -3,7 +3,7 @@
 一个可以在网页中配置的多站点自动签到工具。无需把 Cookie 写进 Docker Compose：启动容器后，在管理页面填写签到接口、登录凭据、每日次数与时间即可。
 
 - **仓库**：[qq987985/checkin](https://github.com/qq987985/checkin)
-- **镜像**：`ghcr.io/qq987985/checkin:latest`，固定版本 `ghcr.io/qq987985/checkin:2.0.0`
+- **镜像**：`ghcr.io/qq987985/checkin:latest`，固定版本 `ghcr.io/qq987985/checkin:2.1.0`
 - **平台**：Linux amd64 / arm64，适用于对应架构的服务器、NAS 和 Docker Desktop。
 - **运行依赖**：Python 标准库，无第三方 Python 依赖。
 
@@ -20,11 +20,9 @@
 - 最近 200 条运行记录，可选 Bark 通知。
 - 中文管理页面，内置签到地址获取说明，适配桌面与窄屏。
 
-## Docker Compose 部署
+## Docker Compose 部署（账号密码登录）
 
-需要已安装 Docker 和 Docker Compose v2。
-
-### 1. 准备文件
+需要 Docker 和 Docker Compose v2。Cookie、签到 Token、接口、次数和时间仍在网页登录后填写。
 
 ```bash
 mkdir -p checkin
@@ -33,23 +31,18 @@ curl -fsSLO https://raw.githubusercontent.com/qq987985/checkin/main/docker-compo
 curl -fsSLo .env https://raw.githubusercontent.com/qq987985/checkin/main/.env.example
 ```
 
-编辑 `.env`，在 `ADMIN_TOKEN=` 后填入**至少 16 位随机字符串**。可用以下命令生成，再粘贴进去：
-
-```bash
-openssl rand -hex 24
-```
-
-`.env` 示例（请自行替换管理令牌）：
+编辑 `.env`：
 
 ```dotenv
-ADMIN_TOKEN=这里替换成你生成的随机管理令牌
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=请替换为你自己的至少12位强密码
+COOKIE_SECURE=true
+PUBLIC_URL=https://checkin.example.com
 BIND_ADDRESS=127.0.0.1
 WEB_PORT=8765
 ```
 
-`ADMIN_TOKEN` 是本工具的管理访问令牌，**不是目标网站的签到 Token**。Cookie、签到接口、API Key、时间和次数都在网页中填写，不需要写进 Compose 或 `.env`。
-
-### 2. 启动
+`ADMIN_USERNAME` / `ADMIN_PASSWORD` 是本工具的管理账号密码，不是签到网站的账号密码。请自行设置密码，不存在内置默认密码。`.env` 为本机部署配置，不提交到仓库；密码含 `$`、`#` 等字符时，按 Compose `.env` 语法使用单引号包裹。建议使用密码管理器生成长随机密码。
 
 ```bash
 docker compose pull
@@ -57,37 +50,56 @@ docker compose up -d
 docker compose ps
 ```
 
-本机浏览器打开 **http://127.0.0.1:8765**，在「管理令牌」中输入 `.env` 设置的 `ADMIN_TOKEN`。令牌仅保存在当前标签页内存，刷新页面后需要重新输入。
+### Lucky HTTPS 反向代理
 
-### 3. 服务器 / NAS 访问
+使用独立子域名，例如 `checkin.example.com`，从域名根路径 `/` 代理整个服务。当前不支持挂到 `/checkin/` 等子路径。
 
-默认端口仅绑定部署机器的 `127.0.0.1`。如果部署在远程服务器，推荐在自己电脑执行 SSH 转发：
+| Lucky 配置 | 填写方式 |
+| --- | --- |
+| Web 服务 | 创建 HTTPS 服务，选择对应域名证书 |
+| 子规则类型 | 反向代理 |
+| 前端域名 | 自己的域名，如 `checkin.example.com` |
+| 后端目标地址 | Lucky 与签到同机且可访问宿主机回环时填 `http://127.0.0.1:8765` |
+| 其他部署方式 | Lucky 在另一台设备或桥接容器内时，填可达的签到主机内网 IP，如 `http://192.168.1.10:8765`；同时将 `.env` 的 `BIND_ADDRESS` 改为该主机内网 IP |
 
-```bash
-ssh -L 8765:127.0.0.1:8765 用户@服务器地址
-```
+将 `.env` 的 `PUBLIC_URL` 设置为实际访问的 HTTPS 地址（包括非标准端口，不含末尾 `/`），保留 `COOKIE_SECURE=true`，重建容器后，通过该 HTTPS 地址打开页面并输入账号密码。Lucky 终止 HTTPS，后端继续使用 HTTP 即可；无需 WebSocket 配置。保留 Cookie、Set-Cookie 和浏览器 Origin 请求头，不要给登录/API 接口添加缓存。
 
-然后在自己电脑打开 **http://127.0.0.1:8765**。
+公网只开放 Lucky 的 HTTPS 入口；后端 8765 端口限制为本机或 Lucky 的内网地址访问。不同设备上的 Lucky 无法通过自己的 `127.0.0.1` 访问签到主机，必须填写可达内网地址。配置项目可参考 [Lucky 官方 Web 服务说明](https://lucky666.cn/docs/modules/web/)。
 
-如果通过 NAS 局域网访问，将 `.env` 的 `BIND_ADDRESS` 改成 NAS 的局域网 IP，再执行 `docker compose up -d`，浏览器访问 `http://NAS局域网IP:8765`。请在可信局域网使用，并限制访问范围；通过公网访问时使用 HTTPS 反向代理。修改 `WEB_PORT` 可避开端口冲突。
+**仅在本机 HTTP 测试时**，将 `COOKIE_SECURE=false`、`PUBLIC_URL=` 留空，再运行 `docker compose up -d`，通过 http://127.0.0.1:8765 登录。开启 Secure 时请从 HTTPS 域名访问，不要用内网 HTTP 地址排查登录状态。
+
+### 登录会话
+
+- 密码只在登录时提交，服务进程用带随机盐的 PBKDF2 摘要校验；不把管理密码写入签到配置或运行日志。
+- 会话保存在服务端内存，有效期 12 小时；Cookie 使用 HttpOnly、SameSite=Strict，HTTPS 模式额外启用 Secure。
+- 支持退出登录；过期或重启服务后需要重新登录。
+- 5 分钟内连续失败 5 次会限制后续登录。为避免信任伪造的代理头，按直连地址限制，经过 Lucky 的访问可能共享同一个限制。
+- 启用账号后不再接受旧 `ADMIN_TOKEN` 绕过登录。修改环境变量里的账号密码后，重建容器生效，旧会话同时失效。
+- 仍为单用户管理工具，不提供多用户权限分级。
 
 ### 完整 docker-compose.yml
 
 ```yaml
 name: checkin
+
 services:
   checkin:
     image: ghcr.io/qq987985/checkin:latest
     container_name: checkin
     restart: unless-stopped
     ports:
+      # 默认仅允许本机访问；远程服务器可通过 SSH 转发或 HTTPS 反向代理访问。
       - "${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8765}:8765"
     environment:
       TZ: Asia/Shanghai
       HOST: 0.0.0.0
       PORT: "8765"
-      ADMIN_TOKEN: ${ADMIN_TOKEN:?请先在.env中设置至少16位的随机管理令牌}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?请先在.env中设置管理账号}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请先在.env中设置至少12位的管理密码}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      PUBLIC_URL: ${PUBLIC_URL:-}
     volumes:
+      # Cookie、Token、站点配置与签到记录均保存于此，升级时保留该目录。
       - ./data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/', timeout=5).close()"]
@@ -164,6 +176,8 @@ services:
 
 升级、重建容器时保留 `data/`，不要把它推送到 GitHub。可停机后备份 `.env` 与 `data/`，恢复时放回原部署目录再启动。
 
+从 2.0 升级到 2.1 时，更新 Compose 和 `.env`，将旧 `ADMIN_TOKEN` 换为账号密码、域名及 Cookie 设置，保留原 `data/`。
+
 ## 更新和常用命令
 
 ```bash
@@ -179,13 +193,13 @@ docker compose logs -f --tail=100 checkin
 docker compose down
 ```
 
-如需固定版本，将镜像标签 `latest` 改为 `2.0.0`。
+如需固定版本，将镜像标签 `latest` 改为 `2.1.0`。
 
 ### 从 Lingxi-Check-in 迁移
 
 1. 在原部署目录执行旧配置的 `docker compose down`。
 2. 备份并保留原 `data/` 目录。
-3. 替换为新 Compose 和 `.env`，填写新的 `ADMIN_TOKEN`。
+3. 替换为新 Compose 和 `.env`，填写新的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 与反代域名配置。
 4. 运行 `docker compose pull && docker compose up -d`，打开管理页添加灵犀站点。
 
 首次启动、尚无 `config.json` 时，可以导入旧 `CHECKIN_URL`、`LINGXI_COOKIE`、`CHECKIN_TIMES`、`BARK_URL` 环境变量；如需自动导入，请仅在首次启动时临时加入这些变量。导入的灵犀站点同时兼容 `data/last_success.txt`。之后以网页保存配置为准。旧镜像不会自动改名或删除。
@@ -200,7 +214,7 @@ cd checkin
 TZ=Asia/Shanghai python3 checkin.py
 ```
 
-打开 http://127.0.0.1:8765 。本机默认绑定回环地址；对外监听必须设置至少 16 位 `ADMIN_TOKEN`。可通过 `HOST`、`PORT`、`DATA_DIR`、`TZ` 调整监听地址、端口、数据目录与时区。
+打开 http://127.0.0.1:8765 。本机开发默认绑定回环地址，可免登录；对外监听应设置 `ADMIN_USERNAME` 和至少 12 位 `ADMIN_PASSWORD`。旧 `ADMIN_TOKEN` 仅在未启用账号时兼容，公网部署请迁移到账号模式。可通过 `HOST`、`PORT`、`DATA_DIR`、`TZ` 调整监听地址、端口、数据目录与时区。
 
 本地构建容器：
 
@@ -214,7 +228,7 @@ docker build -t checkin:local .
 python3 -m unittest discover -s tests -v
 python3 -m py_compile checkin.py
 node --check static/app.js
-ADMIN_TOKEN=local-compose-check-token docker compose config --quiet
+ADMIN_USERNAME=test ADMIN_PASSWORD=compose-test-password docker compose config --quiet
 ```
 
 自动测试只访问本地模拟接口。GitHub Actions 先执行测试、Compose 校验与容器启动检查，再发布 amd64 / arm64 镜像及 `latest`、版本、提交标签。

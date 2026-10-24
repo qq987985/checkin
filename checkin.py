@@ -1,4 +1,6 @@
 """多站点签到服务：python checkin.py，默认 http://127.0.0.1:8765。"""
+import hashlib
+from http.cookies import SimpleCookie
 import hmac
 import json
 import os
@@ -21,7 +23,37 @@ RUN_LOCK = threading.Lock()
 CONFIG = {}
 STATE = {}
 CSRF = secrets.token_urlsafe(32)
-ADMIN_TOKEN = os.environ.get('ADMIN_TOKEN', '')
+ADMIN_TOKEN = os.environ.get('ADMIN_TOKEN', '')  # 兼容旧版本；启用账号后禁用此入口
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
+COOKIE_SECURE = os.environ.get('COOKIE_SECURE', 'false').lower() == 'true'
+PUBLIC_URL = os.environ.get('PUBLIC_URL', '').rstrip('/')
+PASSWORD_SALT = secrets.token_bytes(32)
+PASSWORD_HASH = hashlib.pbkdf2_hmac('sha256', ADMIN_PASSWORD.encode(), PASSWORD_SALT, 600000)
+SESSIONS = {}
+LOGIN_FAILURES = {}
+SESSION_SECONDS = 12 * 60 * 60
+
+
+def session_for(handler):
+    try:
+        cookie = SimpleCookie()
+        cookie.load(handler.headers.get('Cookie', ''))
+        value = cookie['checkin_session'].value if 'checkin_session' in cookie else ''
+    except Exception:
+        return '', None
+    key = hashlib.sha256(value.encode()).hexdigest()
+    with LOCK:
+        entry = SESSIONS.get(key)
+        if entry and entry['expires'] > time.time():
+            return key, entry
+        SESSIONS.pop(key, None)
+    return key, None
+
+
+def session_cookie(value, max_age):
+    return f'checkin_session={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}' + ('; Secure' if COOKIE_SECURE else '')
+
 
 def write_json(path, value):
     DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -231,12 +263,14 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def respond(self, code, value, content_type='application/json; charset=utf-8'):
+    def respond(self, code, value, content_type='application/json; charset=utf-8', cookie=None):
         body = json.dumps(value, ensure_ascii=False).encode() if content_type.startswith('application/json') else value
         self.send_response(code)
         self.send_header('Content-Type', content_type)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store')
+        if cookie:
+            self.send_header('Set-Cookie', cookie)
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('X-Frame-Options', 'DENY')
         self.send_header('Content-Security-Policy', "default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'")
@@ -244,6 +278,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def authorized(self):
+        if ADMIN_USERNAME:
+            return session_for(self)[1] is not None
         if ADMIN_TOKEN:
             return hmac.compare_digest(self.headers.get('Authorization', ''), 'Bearer ' + ADMIN_TOKEN)
         # 本地免令牌模式拒绝非本机 Host，防止 DNS 重绑定读取配置。
@@ -258,20 +294,82 @@ class Handler(BaseHTTPRequestHandler):
             name = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}[path]
             mime = {'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript; charset=utf-8', 'style.css': 'text/css; charset=utf-8'}[name]
             return self.respond(200, (ROOT / 'static' / name).read_bytes(), mime)
+        if path == '/api/auth':
+            return self.respond(200, {'mode': 'password' if ADMIN_USERNAME else 'token' if ADMIN_TOKEN else 'local', 'authenticated': self.authorized()})
         if not self.authorized():
-            return self.respond(401, {'error': '请填写管理访问令牌'})
+            return self.respond(401, {'error': '请先登录'})
         if path == '/api/config':
-            return self.respond(200, {**public_config(), 'csrf': CSRF})
+            session = session_for(self)[1] if ADMIN_USERNAME else None
+            if ADMIN_USERNAME and session is None:
+                return self.respond(401, {'error': '登录已过期，请重新登录'})
+            return self.respond(200, {**public_config(), 'csrf': session['csrf'] if session else CSRF})
         if path == '/api/state':
             with LOCK:
                 return self.respond(200, {**STATE, 'today': datetime.now().strftime('%Y-%m-%d'), 'server_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 'timezone': os.getenv('TZ', '系统时区')})
         self.respond(404, {'error': '未找到'})
 
+    def login(self):
+        if not ADMIN_USERNAME:
+            return self.respond(400, {'error': '服务器尚未启用账号登录'})
+        if PUBLIC_URL and self.headers.get('Origin') and self.headers['Origin'] != PUBLIC_URL:
+            return self.respond(403, {'error': '访问域名不匹配，请使用配置的公网地址'})
+        if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
+            return self.respond(415, {'error': '请求格式无效'})
+        try:
+            size = int(self.headers.get('Content-Length', '0'))
+            if not 0 < size <= 4096:
+                raise ValueError()
+            payload = json.loads(self.rfile.read(size))
+            username, password = payload['username'], payload['password']
+            if not isinstance(username, str) or not isinstance(password, str):
+                raise ValueError()
+        except (ValueError, KeyError, TypeError):
+            return self.respond(400, {'error': '请输入账号和密码'})
+        now, peer = time.time(), self.client_address[0]
+        # 不信任客户端可伪造的 X-Forwarded-For；单用户服务按直连地址限速。
+        with LOCK:
+            for ip in list(LOGIN_FAILURES):
+                if now - LOGIN_FAILURES[ip]['since'] >= 300:
+                    del LOGIN_FAILURES[ip]
+            failure = LOGIN_FAILURES.setdefault(peer, {'since': now, 'count': 0})
+            if failure['count'] >= 5:
+                return self.respond(429, {'error': '登录失败次数过多，请在 5 分钟后重试'})
+            if len(LOGIN_FAILURES) > 1024:
+                return self.respond(429, {'error': '登录繁忙，请稍后再试'})
+            failure['count'] += 1
+        candidate = hashlib.pbkdf2_hmac('sha256', password.encode(), PASSWORD_SALT, 600000)
+        valid = hmac.compare_digest(username.encode(), ADMIN_USERNAME.encode()) & hmac.compare_digest(candidate, PASSWORD_HASH)
+        if not valid:
+            return self.respond(401, {'error': '账号或密码错误'})
+        sid = secrets.token_urlsafe(48)
+        with LOCK:
+            LOGIN_FAILURES.pop(peer, None)
+            for key in list(SESSIONS):
+                if SESSIONS[key]['expires'] <= now:
+                    del SESSIONS[key]
+            old_key, _ = session_for(self)
+            SESSIONS.pop(old_key, None)
+            if len(SESSIONS) >= 100:
+                del SESSIONS[min(SESSIONS, key=lambda key: SESSIONS[key]['expires'])]
+            SESSIONS[hashlib.sha256(sid.encode()).hexdigest()] = {'expires': now + SESSION_SECONDS, 'csrf': secrets.token_urlsafe(32)}
+        return self.respond(200, {'ok': True}, cookie=session_cookie(sid, SESSION_SECONDS))
+
     def do_POST(self):
+        path = urlsplit(self.path).path
+        if path == '/api/login':
+            return self.login()
         if not self.authorized():
-            return self.respond(401, {'error': '管理令牌无效'})
-        if self.headers.get('X-CSRF-Token') != CSRF:
+            return self.respond(401, {'error': '请先登录'})
+        session = session_for(self)[1] if ADMIN_USERNAME else None
+        if ADMIN_USERNAME and session is None:
+            return self.respond(401, {'error': '登录已过期，请重新登录'})
+        expected = session['csrf'] if session else CSRF
+        if self.headers.get('X-CSRF-Token') != expected:
             return self.respond(403, {'error': '页面已失效，请刷新'})
+        if path == '/api/logout':
+            with LOCK:
+                SESSIONS.pop(session_for(self)[0], None)
+            return self.respond(200, {'ok': True}, cookie=session_cookie('', 0))
         try:
             size = int(self.headers.get('Content-Length', '0'))
             if not 0 < size <= 100000:
@@ -319,8 +417,12 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     host, port = os.getenv('HOST', '127.0.0.1'), int(os.getenv('PORT', '8765'))
-    if host not in ('127.0.0.1', 'localhost', '::1') and len(ADMIN_TOKEN) < 16:
-        raise SystemExit('对外监听时请设置至少 16 位的 ADMIN_TOKEN')
+    if bool(ADMIN_USERNAME) != bool(ADMIN_PASSWORD) or ADMIN_USERNAME and len(ADMIN_PASSWORD) < 12:
+        raise SystemExit('请同时设置 ADMIN_USERNAME 和至少 12 位的 ADMIN_PASSWORD')
+    if PUBLIC_URL and (urlsplit(PUBLIC_URL).scheme != 'https' or not urlsplit(PUBLIC_URL).hostname or urlsplit(PUBLIC_URL).path):
+        raise SystemExit('PUBLIC_URL 应为不含路径的 HTTPS 公网域名，如 https://checkin.example.com')
+    if host not in ('127.0.0.1', 'localhost', '::1') and not ADMIN_USERNAME and len(ADMIN_TOKEN) < 16:
+        raise SystemExit('对外监听请设置 ADMIN_USERNAME / ADMIN_PASSWORD，或旧版 ADMIN_TOKEN')
     if hasattr(time, 'tzset'):
         time.tzset()
     load()

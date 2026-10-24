@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import threading
@@ -9,7 +10,8 @@ from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('checkin', Path(__file__).parents[1] / 'checkin.py')
 app = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(app)
+with patch.dict(os.environ, {'ADMIN_USERNAME': '', 'ADMIN_PASSWORD': '', 'ADMIN_TOKEN': ''}):
+    spec.loader.exec_module(app)
 
 class Mock(BaseHTTPRequestHandler):
     received = []
