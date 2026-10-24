@@ -3,7 +3,7 @@
 一个可以在网页中配置的多站点自动签到工具。无需把 Cookie 写进 Docker Compose：启动容器后，在管理页面填写签到接口、登录凭据、每日次数与时间即可。
 
 - **仓库**：[qq987985/checkin](https://github.com/qq987985/checkin)
-- **镜像**：`ghcr.io/qq987985/checkin:latest`，固定版本 `ghcr.io/qq987985/checkin:2.1.0`
+- **镜像**：`ghcr.io/qq987985/checkin:latest`，固定版本 `ghcr.io/qq987985/checkin:2.1.1`
 - **平台**：Linux amd64 / arm64，适用于对应架构的服务器、NAS 和 Docker Desktop。
 - **运行依赖**：Python 标准库，无第三方 Python 依赖。
 
@@ -138,6 +138,10 @@ services:
 
 **网页签到：**电脑浏览器登录 → 打开开发者工具的 Network（网络）面板 → 选择 Fetch/XHR → 手动点击「签到」→ 找到对应请求 → 在 Headers 中复制 Request URL 和 Request Method。验证 Cookie / Token 位于 Request Headers，请求体位于 Payload。必要时切回 All 查看全部请求。可右键该请求选择 Copy as cURL，便于核对完整参数。
 
+**请求方法怎么确定：**点击实际签到请求 → Headers（请求头）→ General（常规）→ 查看 `Request Method`。显示 `POST` 就选 POST，显示 `GET` 就选 GET，PUT / PATCH 同理。`Request URL` 才是签到地址，方法和地址必须从同一条请求复制；不能根据网址猜方法，也不能照用默认 POST。
+
+找不到对应请求时，先清空网络记录再点击签到，检查新出现的 Fetch/XHR 请求，并在 Response / Preview 中确认返回了签到结果。checkin、sign 等名称仅作查找线索，不要选统计上报或 OPTIONS 预检请求。
+
 **豆包 App：**需要从手机 App 实际签到时的请求取得 URL、请求头和请求体。火山方舟模型 API Key 不等于豆包 App 登录凭据。需要动态签名、设备参数或验证码的接口不能仅靠静态 Token 配置完成。
 
 完整 cURL、Cookie 和 Token 可能包含账号凭据，请直接在自己的管理页面填写，不要提交到公开仓库。
@@ -193,7 +197,7 @@ docker compose logs -f --tail=100 checkin
 docker compose down
 ```
 
-如需固定版本，将镜像标签 `latest` 改为 `2.1.0`。
+如需固定版本，将镜像标签 `latest` 改为 `2.1.1`。
 
 ### 从 Lingxi-Check-in 迁移
 

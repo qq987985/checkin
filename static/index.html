@@ -13,12 +13,14 @@
 </main>
 <dialog id="editor"><form id="site-form"><div class="modal-head"><div><span class="eyebrow">SITE CONFIGURATION</span><h2 id="editor-title">添加签到站点</h2></div><button type="button" class="close" data-close="editor" aria-label="关闭">×</button></div><input type="hidden" id="site-id">
 <div class="form-grid"><label>站点名称<input id="name" required maxlength="80" placeholder="例如：金山灵犀 / 豆包 App"></label><label>执行开关<select id="active"><option value="yes">启用自动签到</option><option value="no">暂停自动签到</option></select></label></div>
-<div class="form-grid url-grid"><label>请求方法<select id="method"><option>POST</option><option>GET</option><option>PUT</option><option>PATCH</option></select></label><label>签到接口 URL<input id="url" type="url" aria-describedby="url-hint" required placeholder="https://example.com/api/checkin"></label></div>
-<div class="url-help"><p id="url-hint">填写点击「签到」时实际发送的接口地址，不是网站首页或签到页面的网址。</p>
-<details id="url-guide"><summary>签到地址在哪里获取？</summary>
+<div class="form-grid url-grid"><label>请求方法（不是网址）<select id="method" aria-describedby="method-hint"><option>POST</option><option>GET</option><option>PUT</option><option>PATCH</option></select></label><label>签到接口 URL<input id="url" type="url" aria-describedby="url-hint" required placeholder="https://example.com/api/checkin"></label></div>
+<div class="url-help"><p id="method-hint"><b>请求方法怎么选？</b>在网络面板里打开实际签到请求 → Headers（请求头）→ General（常规）→ 查看 <b>Request Method</b>：显示 POST 就选 POST，显示 GET 就选 GET，PUT / PATCH 同理。不要根据网址猜测，也不要直接照用默认 POST。</p><p id="url-hint">填写点击「签到」时实际发送的接口地址，不是网站首页或签到页面的网址。</p>
+<details id="url-guide"><summary>签到地址和请求方法在哪里获取？</summary>
 <h3>网页签到（如金山灵犀 / WPS）</h3>
 <ol><li>在电脑浏览器登录账号，打开能手动签到的页面。</li><li>打开开发者工具（F12；Mac 可按 ⌥⌘I），切换到 Network（网络），选中 Fetch/XHR。</li><li>保持网络面板打开，手动点击一次「签到」，查看这次新增的请求。若看不到请求，切回 All（全部）。</li><li>打开对应请求，在 Headers（请求头）→ General（常规）中复制 <b>Request URL</b>，粘贴到上方；把 <b>Request Method</b> 选为相同的方法。</li><li>在 Request Headers 中查看 Cookie、Authorization 或其他 Token 请求头，填写下方验证方式和凭据；如有 Payload（请求载荷），在高级配置中填写请求体。</li></ol>
-<h3>豆包 App 签到</h3><p>需要从手机 App 实际点击签到时的网络请求获取 URL、请求头和请求体；电脑端豆包首页或火山方舟模型 API 地址不能代替它。可使用支持该设备的网络调试工具查看自己账号的签到请求。若无法获取请求，暂时无法配置自动签到。</p><p>如果请求包含动态签名、设备校验或一次性参数，复制地址和 Token 仍可能无法重放，需要专门适配。</p>
+<h3>怎样确定找对了签到请求？</h3><p>先清空网络记录，再手动点击一次「签到」，检查刚出现的 Fetch/XHR 请求；在 Response（响应）或 Preview（预览）中确认它返回了签到结果。可结合 checkin、sign 等名称查找，但名称只作线索，最终以响应内容为准。不要选图片、页面文件、统计上报或 OPTIONS 预检请求。</p>
+<h3>填写示例（仅演示，不能直接使用）</h3><p><code>Request URL: https://example.com/api/checkin</code><br><code>Request Method: POST</code><br>对应填写：签到接口 URL = 上面的完整网址；请求方法 = POST。两项必须来自<b>同一条实际签到请求</b>。如果看不到 Request Method，先确认打开了请求详情，不要猜选。</p>
+<h3>豆包 App 签到</h3><p>需要从手机 App 实际点击签到时的网络请求获取 URL、HTTP Method（请求方法）、请求头和请求体；电脑端豆包首页或火山方舟模型 API 地址不能代替它。可使用支持该设备的网络调试工具查看自己账号的签到请求。若无法获取请求，暂时无法配置自动签到。</p><p>如果请求包含动态签名、设备校验或一次性参数，复制地址和 Token 仍可能无法重放，需要专门适配。</p>
 <p class="guide-tip">可右键网页请求 → Copy → Copy as cURL，便于核对地址、方法、请求头和请求体。完整 cURL 可能含登录凭据，请只在本机保存和填写。</p>
 </details></div>
 <div class="form-grid"><label>验证方式<select id="auth"><option value="cookie">Cookie</option><option value="bearer">Bearer Token</option><option value="api_key">API Key / 自定义 Token 请求头</option><option value="none">无需验证 / 使用自定义请求头</option></select></label><label id="key-label">API Key 请求头名称<input id="auth-header" value="X-API-Key" placeholder="X-API-Key"></label></div>

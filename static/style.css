@@ -4,3 +4,5 @@
 .url-help{background:#f0f6f2;border:1px solid #dce9e0;border-radius:8px;padding:12px 14px;margin:-3px 0 19px;font-size:12px;line-height:1.7}.url-help p{color:#567262;margin:0}.url-help details{border:0;padding-top:8px;margin-top:0}.url-help summary{margin:0;color:#147b61;font-weight:600}.url-help details[open] summary{margin-bottom:12px}.url-help h3{font-size:12px;margin:14px 0 6px;color:#315740}.url-help ol{padding-left:20px;margin:6px 0;color:#567262}.url-help li{margin:7px 0}.url-help .guide-tip{border-top:1px solid #dce9e0;margin-top:12px;padding-top:10px;font-size:11px}
 
 body.locked>aside,body.locked>main{visibility:hidden}body.locked{background:#edf4ef}#access-dialog{width:410px;padding:32px}#access-dialog h2{font-size:24px;margin-top:15px}#access-dialog .login-intro{margin:12px 0 24px}#access-dialog .modal-actions button{width:100%}
+
+#method-hint{margin-bottom:10px}.url-help code{overflow-wrap:anywhere;font-size:11px}
