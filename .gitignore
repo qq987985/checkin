@@ -1,4 +1,6 @@
 __pycache__/
 *.pyc
-last_success.txt
 .DS_Store
+.env
+data/
+last_success.txt

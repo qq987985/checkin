@@ -1,119 +1,329 @@
-import re
-import requests
-import time
-import schedule
+"""多站点签到服务：python checkin.py，默认 http://127.0.0.1:8765。"""
+import hmac
+import json
 import os
-from urllib.parse import quote
-from datetime import date
+import re
+import secrets
+import threading
+import time
+import uuid
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
-# 将成功状态持久化写入本地文件，防止重启后失忆
-# 放在 data/ 目录下，配合 docker-compose 的 volume 挂载实现容器重建后仍保留
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-STATUS_FILE = os.path.join(DATA_DIR, "last_success.txt")
+ROOT = Path(__file__).resolve().parent
+DATA = Path(os.environ.get('DATA_DIR', ROOT / 'data'))
+LOCK = threading.RLock()
+RUN_LOCK = threading.Lock()
+CONFIG = {}
+STATE = {}
+CSRF = secrets.token_urlsafe(32)
+ADMIN_TOKEN = os.environ.get('ADMIN_TOKEN', '')
 
-def send_bark(title, content):
-    bark_url = os.environ.get("BARK_URL")
-    if not bark_url or "请在这里填入" in bark_url:
-        return
-        
-    if not bark_url.endswith('/'):
-        bark_url += '/'
-        
+def write_json(path, value):
+    DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temp = path.with_suffix('.tmp')
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        json.dump(value, f, ensure_ascii=False, indent=2)
+    os.replace(temp, path)
+
+def load():
+    global CONFIG, STATE
+    DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
+    cp, sp = DATA / 'config.json', DATA / 'state.json'
+    if cp.exists():
+        CONFIG = json.loads(cp.read_text())
+    else:
+        sites = []
+        url, cookie = os.getenv('CHECKIN_URL', ''), os.getenv('LINGXI_COOKIE', '')
+        if url and cookie and '请在这里' not in url + cookie:
+            sites.append(dict(id='lingxi', name='金山灵犀', enabled=True, url=url,
+                              method='POST', auth_type='cookie', secret=cookie,
+                              times=os.getenv('CHECKIN_TIMES', '08:30,16:30').split(','),
+                              headers={}, body='', body_type='none', success_path='', success_value='',
+                              success_keywords='成功,已签到,已签过', failure_keywords='未登录,失败,过期', auth_header='X-API-Key'))
+        bark = os.getenv('BARK_URL', '')
+        CONFIG = dict(sites=sites, bark_url=bark if '请在这里' not in bark else '')
+        write_json(cp, CONFIG)
+    STATE = json.loads(sp.read_text()) if sp.exists() else {'success': {}, 'logs': [], 'attempts': {}}
+    legacy = DATA / 'last_success.txt'
+    if legacy.exists() and any(s['id'] == 'lingxi' for s in CONFIG['sites']):
+        STATE['success'].setdefault('lingxi', legacy.read_text().strip())
+    STATE.setdefault('attempts', {})
+    STATE.setdefault('counts', {})
+
+def validate_site(s):
+    s = dict(s)
+    s['id'] = s.get('id') or uuid.uuid4().hex
+    s['name'] = str(s.get('name', '')).strip()
+    if not s['name'] or len(s['name']) > 80:
+        raise ValueError('名称不能为空，最多 80 字')
+    s['url'] = str(s.get('url', '')).strip()
+    u = urlsplit(s['url'])
+    if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password:
+        raise ValueError('请填写有效的 HTTP/HTTPS 签到接口 URL')
+    if s.get('method') not in ('GET', 'POST', 'PUT', 'PATCH'):
+        raise ValueError('不支持的请求方法')
+    if s.get('auth_type') not in ('none', 'cookie', 'bearer', 'api_key'):
+        raise ValueError('不支持的验证方式')
+    if s.get('auth_type') != 'none' and not s.get('secret'):
+        raise ValueError('请填写 Cookie 或 Token')
+    s['times'] = sorted(set(t.strip() for t in s.get('times', [])))
+    if not s['times'] or any(not re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d', t) for t in s['times']):
+        raise ValueError('签到时间应为 HH:MM，可填写多个')
+    headers = s.get('headers', {})
+    if not isinstance(headers, dict) or any(not isinstance(k, str) or not isinstance(v, str) or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", k) or '\r' in v or '\n' in v for k, v in headers.items()):
+        raise ValueError('请求头必须是 JSON 对象，值为无换行的字符串')
+    if s.get('auth_type') == 'api_key' and not re.fullmatch(r'[A-Za-z0-9_-]+', s.get('auth_header', '')):
+        raise ValueError('API Key 请求头名称无效')
+    if '\r' in s.get('secret', '') or '\n' in s.get('secret', ''):
+        raise ValueError('验证凭据不能包含换行')
+    if s.get('body_type') not in ('none', 'json', 'raw'):
+        raise ValueError('请求体类型无效')
+    if s.get('body_type') == 'json':
+        json.loads(s.get('body', '') or '{}')
+    s['daily_limit'] = int(s.get('daily_limit', 1))
+    if not 1 <= s['daily_limit'] <= 50:
+        raise ValueError('每日次数应在 1 到 50 之间')
+    s['enabled'] = bool(s.get('enabled', True))
+    return s
+
+def public_config():
+    with LOCK:
+        result = json.loads(json.dumps(CONFIG))
+        for s in result['sites']:
+            s['has_secret'] = bool(s.pop('secret', ''))
+            s['has_headers'] = bool(s.pop('headers', {}))
+            s['has_body'] = bool(s.pop('body', ''))
+            # URLs may contain query credentials; management page is authenticated.
+        result['has_bark'] = bool(result.pop('bark_url', ''))
+        return result
+
+def classify(site, status, text):
+    if status < 200 or status >= 300:
+        return 'failed'
     try:
-        url = f"{bark_url}{quote(title)}/{quote(content)}"
-        requests.get(url, timeout=10)
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Bark 推送成功")
-    except Exception as e:
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Bark 推送失败: {e}")
+        obj = json.loads(text)
+    except ValueError:
+        obj = None
+    failures = [x.strip() for x in site.get('failure_keywords', '未登录,失败,过期').split(',') if x.strip()]
+    if any(x in text for x in failures):
+        return 'failed'
+    if isinstance(obj, dict) and (obj.get('success') is False or ('error' in obj and obj['error'] not in (0, None, False))):
+        return 'failed'
+    path = site.get('success_path', '').strip()
+    if path:
+        try:
+            value = obj
+            for part in path.split('.'):
+                value = value[int(part)] if isinstance(value, list) else value[part]
+            expected = site.get('success_value', '')
+            try:
+                expected = json.loads(expected)
+            except ValueError:
+                pass
+            return 'success' if type(value) is type(expected) and value == expected else 'unknown'
+        except (KeyError, TypeError, IndexError, ValueError):
+            return 'unknown'
+    words = [x.strip() for x in site.get('success_keywords', '成功,已签到,已签过').split(',') if x.strip()]
+    if any(x in text for x in words) or isinstance(obj, dict) and (obj.get('success') is True or ('error' in obj and type(obj['error']) is int and obj['error'] == 0)):
+        return 'success'
+    return 'unknown'
 
-def do_checkin():
-    today_str = str(date.today())
-    
-    # 检查本地文件记录的成功日期
-    if os.path.exists(STATUS_FILE):
-        with open(STATUS_FILE, "r") as f:
-            last_success = f.read().strip()
-        if last_success == today_str:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 今日已签到成功，跳过本次执行。")
-            return
-
-    url = os.environ.get("CHECKIN_URL")
-    if not url or "请在这里填入" in url or "xxx" in url:
-        error_msg = "错误: 未配置有效的 CHECKIN_URL 环境变量。"
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {error_msg}")
-        send_bark("灵犀签到失败", error_msg)
-        return
-
-    cookie = os.environ.get("LINGXI_COOKIE")
-    if not cookie or "请在这里填入" in cookie:
-        error_msg = "错误: 未配置有效的 LINGXI_COOKIE 环境变量。"
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {error_msg}")
-        send_bark("灵犀签到失败", error_msg)
-        return
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-        "Cookie": cookie
-    }
-
+def execute(site):
+    headers = {'User-Agent': 'Checkin/2.0', **site.get('headers', {})}
+    auth = site.get('auth_type')
+    key = {'cookie': 'Cookie', 'bearer': 'Authorization', 'api_key': site.get('auth_header', 'X-API-Key')}.get(auth)
+    if key:
+        headers = {k: v for k, v in headers.items() if k.lower() != key.lower()}
+        headers[key] = ('Bearer ' if auth == 'bearer' else '') + site['secret']
+    body = None
+    if site.get('body_type') != 'none':
+        body = site.get('body', '').encode()
+        if site.get('body_type') == 'json':
+            headers.setdefault('Content-Type', 'application/json')
+    # Do not follow redirects with credentials to a different host.
+    from urllib.request import build_opener, HTTPRedirectHandler
+    class NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+    req = Request(site['url'], data=body, headers=headers, method=site['method'])
     try:
-        response = requests.post(url, headers=headers, timeout=10)
-        res_text = response.text
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 签到响应: {res_text}")
+        with build_opener(NoRedirect).open(req, timeout=20) as response:
+            status = response.status
+            text = response.read(1024 * 1024).decode('utf-8', errors='replace')
+    except HTTPError as e:
+        status, text = e.code, e.read(1024 * 1024).decode('utf-8', errors='replace')
+    return classify(site, status, text), status
 
-        res_compact = res_text.lower().replace(" ", "")
-        is_fail = ("未登录" in res_text
-                   or "失败" in res_text
-                   or ('"error"' in res_compact and '"error":0' not in res_compact))
-        is_success = ("成功" in res_text
-                      or "已签到" in res_text
-                      or "已签过" in res_text
-                      or '"success":true' in res_compact
-                      or '"error":0' in res_compact)
+def success_count(site_id, day):
+    count = STATE.get('counts', {}).get(site_id, {})
+    if count.get('day') == day:
+        return count.get('count', 0)
+    return 1 if STATE['success'].get(site_id) == day else 0
 
-        if is_fail:
-            # 明确的失败特征：未登录/失败/非零 error
-            send_bark("灵犀签到异常(Cookie可能已失效)", res_text)
-        elif is_success:
-            # 明确的成功特征：成功/已签到/重复签到（今天已签过也算成功，避免重复通知）
-            send_bark("灵犀签到结果", res_text)
-            # 签到成功后，将今天的日期写入文件持久保存
-            os.makedirs(DATA_DIR, exist_ok=True)
-            with open(STATUS_FILE, "w") as f:
-                f.write(today_str)
-        else:
-            # 无法识别的响应：通知人工确认，但不写入成功状态，下个时间点会重试
-            send_bark("灵犀签到结果未知(请人工确认)", res_text)
-            
-    except Exception as e:
-        error_msg = f"签到请求网络异常: {e}"
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {error_msg}")
-        send_bark("灵犀签到运行异常", error_msg)
 
-if __name__ == "__main__":
-    print("启动金山灵犀自动签到服务...")
-    
-    times_str = os.environ.get("CHECKIN_TIMES", "08:30,16:30")
-    raw_times = [t.strip() for t in times_str.split(",") if t.strip()]
+def run_site(site_id):
+    if not RUN_LOCK.acquire(blocking=False):
+        return {'result': 'busy', 'message': '有任务执行中，请稍后再试'}
+    try:
+        with LOCK:
+            site = next((dict(s) for s in CONFIG['sites'] if s['id'] == site_id), None)
+            if site is None:
+                raise ValueError('站点不存在')
+            today = datetime.now().strftime('%Y-%m-%d')
+            if success_count(site_id, today) >= site.get('daily_limit', 1):
+                return {'result': 'skipped', 'message': '今天已达到签到次数，已跳过'}
+        try:
+            result, status = execute(site)
+            message = {'success': '签到成功', 'failed': '签到失败，请检查凭据和结果规则', 'unknown': '响应未匹配成功规则，请人工确认'}[result]
+            message += f'（HTTP {status}）'
+        except Exception:
+            result, status, message = 'failed', None, '请求异常，请检查接口地址、网络或证书'
+        with LOCK:
+            entry = dict(site_id=site_id, name=site['name'], time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'), result=result, message=message)
+            if result == 'success':
+                STATE['counts'][site_id] = {'day': today, 'count': success_count(site_id, today) + 1}
+                STATE['success'][site_id] = today
+            STATE['logs'] = [entry] + STATE['logs'][:199]
+            write_json(DATA / 'state.json', STATE)
+            bark = CONFIG.get('bark_url', '')
+        if bark:
+            try:
+                payload = json.dumps({'title': site['name'] + '签到', 'body': message}).encode()
+                with urlopen(Request(bark, data=payload, headers={'Content-Type': 'application/json'}), timeout=10):
+                    pass
+            except Exception:
+                pass
+        return entry
+    finally:
+        RUN_LOCK.release()
 
-    # 校验时间格式必须为 HH:MM，非法格式直接剔除并告警，避免启动即崩溃
-    times_list = []
-    for t in raw_times:
-        if re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t):
-            times_list.append(t)
-        else:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 警告: 签到时间 '{t}' 格式非法(应为 HH:MM)，已忽略。")
+def tick(now=None):
+    now = now or datetime.now()
+    day, minute = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
+    with LOCK:
+        ids = [s['id'] for s in CONFIG['sites'] if s.get('enabled') and minute in s.get('times', []) and success_count(s['id'], day) < s.get('daily_limit', 1) and STATE['attempts'].get(s['id']) != day + ' ' + minute]
+    for sid in ids:
+        with LOCK:
+            STATE['attempts'][sid] = day + ' ' + minute
+            write_json(DATA / 'state.json', STATE)
+        result = run_site(sid)
+        if result['result'] == 'busy':
+            with LOCK:
+                STATE['attempts'].pop(sid, None)
+                write_json(DATA / 'state.json', STATE)
 
-    if not times_list:
-        times_list = ["08:30"]
-        
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 设定的每日签到时间: {', '.join(times_list)}")
-    
-    for t in times_list:
-        schedule.every().day.at(t).do(do_checkin)
-        
-    do_checkin() 
-    
+
+def scheduler():
     while True:
-        schedule.run_pending()
-        time.sleep(60)
+        try:
+            tick()
+        except Exception:
+            print('调度异常，请检查数据目录权限', flush=True)
+        time.sleep(5)
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def respond(self, code, value, content_type='application/json; charset=utf-8'):
+        body = json.dumps(value, ensure_ascii=False).encode() if content_type.startswith('application/json') else value
+        self.send_response(code)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('Content-Security-Policy', "default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def authorized(self):
+        if ADMIN_TOKEN:
+            return hmac.compare_digest(self.headers.get('Authorization', ''), 'Bearer ' + ADMIN_TOKEN)
+        # 本地免令牌模式拒绝非本机 Host，防止 DNS 重绑定读取配置。
+        try:
+            return urlsplit('http://' + self.headers.get('Host', '')).hostname in ('127.0.0.1', 'localhost', '::1')
+        except ValueError:
+            return False
+
+    def do_GET(self):
+        path = urlsplit(self.path).path
+        if path in ('/', '/app.js', '/style.css'):
+            name = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}[path]
+            mime = {'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript; charset=utf-8', 'style.css': 'text/css; charset=utf-8'}[name]
+            return self.respond(200, (ROOT / 'static' / name).read_bytes(), mime)
+        if not self.authorized():
+            return self.respond(401, {'error': '请填写管理访问令牌'})
+        if path == '/api/config':
+            return self.respond(200, {**public_config(), 'csrf': CSRF})
+        if path == '/api/state':
+            with LOCK:
+                return self.respond(200, {**STATE, 'today': datetime.now().strftime('%Y-%m-%d'), 'server_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 'timezone': os.getenv('TZ', '系统时区')})
+        self.respond(404, {'error': '未找到'})
+
+    def do_POST(self):
+        if not self.authorized():
+            return self.respond(401, {'error': '管理令牌无效'})
+        if self.headers.get('X-CSRF-Token') != CSRF:
+            return self.respond(403, {'error': '页面已失效，请刷新'})
+        try:
+            size = int(self.headers.get('Content-Length', '0'))
+            if not 0 < size <= 100000:
+                raise ValueError('请求大小无效')
+            payload = json.loads(self.rfile.read(size))
+            path = urlsplit(self.path).path
+            if path == '/api/site':
+                with RUN_LOCK, LOCK:
+                    old = next((s for s in CONFIG['sites'] if s['id'] == payload.get('id')), {})
+                    for field, default in [('secret', ''), ('headers', {}), ('body', '')]:
+                        if payload.get(field) is None or field not in payload:
+                            payload[field] = old.get(field, default)
+                    site = validate_site(payload)
+                    if old and old != site:
+                        # 保留当天计数；编辑配置不会意外重新签到。
+                        pass
+                    CONFIG['sites'] = [site if s['id'] == site['id'] else s for s in CONFIG['sites']]
+                    if not old:
+                        CONFIG['sites'].append(site)
+                    write_json(DATA / 'config.json', CONFIG)
+                return self.respond(200, {'ok': True})
+            if path == '/api/delete':
+                with RUN_LOCK, LOCK:
+                    CONFIG['sites'] = [s for s in CONFIG['sites'] if s['id'] != payload['id']]
+                    STATE['success'].pop(payload['id'], None)
+                    STATE['counts'].pop(payload['id'], None)
+                    STATE['attempts'].pop(payload['id'], None)
+                    write_json(DATA / 'config.json', CONFIG)
+                    write_json(DATA / 'state.json', STATE)
+                return self.respond(200, {'ok': True})
+            if path == '/api/run':
+                return self.respond(200, run_site(payload['id']))
+            if path == '/api/settings':
+                bark = payload.get('bark_url')
+                with LOCK:
+                    if bark is not None:
+                        if bark and (urlsplit(bark).scheme != 'https' or not urlsplit(bark).hostname):
+                            raise ValueError('Bark 地址必须是 HTTPS URL')
+                        CONFIG['bark_url'] = bark
+                    write_json(DATA / 'config.json', CONFIG)
+                return self.respond(200, {'ok': True})
+            self.respond(404, {'error': '未找到'})
+        except (ValueError, KeyError, TypeError):
+            self.respond(400, {'error': '配置无效，请检查 URL、验证凭据、时间和 JSON 格式'})
+
+if __name__ == '__main__':
+    host, port = os.getenv('HOST', '127.0.0.1'), int(os.getenv('PORT', '8765'))
+    if host not in ('127.0.0.1', 'localhost', '::1') and len(ADMIN_TOKEN) < 16:
+        raise SystemExit('对外监听时请设置至少 16 位的 ADMIN_TOKEN')
+    if hasattr(time, 'tzset'):
+        time.tzset()
+    load()
+    threading.Thread(target=scheduler, daemon=True).start()
+    print(f'签到已启动：http://{host}:{port}', flush=True)
+    ThreadingHTTPServer((host, port), Handler).serve_forever()

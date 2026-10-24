@@ -1,15 +1,29 @@
+name: checkin
+
 services:
-  lingxi-checkin:
-    image: ghcr.1ms.run/qq987985/lingxi-checkin:latest
-    container_name: lingxi-checkin
+  checkin:
+    image: ghcr.io/qq987985/checkin:latest
+    container_name: checkin
     restart: unless-stopped
+    ports:
+      # 默认仅允许本机访问；远程服务器可通过 SSH 转发或 HTTPS 反向代理访问。
+      - "${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8765}:8765"
     environment:
-      - TZ=Asia/Shanghai
-      - CHECKIN_TIMES=08:30,16:30
-      # 推送至GitHub的占位符配置，注意保护隐私
-      - CHECKIN_URL=请在这里填入抓取到的真实签到接口URL
-      - LINGXI_COOKIE=请在这里填入你的真实Cookie
-      - BARK_URL=请在这里填入你的Bark推送链接(包含Key)
+      TZ: Asia/Shanghai
+      HOST: 0.0.0.0
+      PORT: "8765"
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?请先在.env中设置至少16位的随机管理令牌}
     volumes:
-      # 持久化签到状态文件，防止容器重建后重复签到/重复通知
+      # Cookie、Token、站点配置与签到记录均保存于此，升级时保留该目录。
       - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/', timeout=5).close()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
