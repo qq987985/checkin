@@ -1,0 +1,22 @@
+{
+  "uuid": "unit-test-uuid",
+  "password": "unit-test-cloud-password",
+  "data": {
+    "cookie_data": {
+      "127.0.0.1": [
+        {
+          "domain": "127.0.0.1",
+          "hostOnly": true,
+          "path": "/",
+          "name": "session",
+          "value": "fixture-cookie",
+          "session": true,
+          "secure": false
+        }
+      ]
+    },
+    "local_storage_data": {}
+  },
+  "legacy": "U2FsdGVkX18xMjM0NTY3OOrtuj30sZJvAgDd+jruf0XrirtN+RcuXORmq5wqWos2rrfByIUlK05wzbSDMV24PB+i90TWiMTUykVxDKOe9B6YFMWPRwV94RZ5QWpj1I8HhQ0FcNlmrcmKY1xkIIlK6aDCjeVx9sLInY89utsrs/l7bLziG4AQZ3GhN34nGVWWnDcTQJz0raKU4gn9l/0uTruyG3H/V0Yeu8KLGpG3rFP3kSInRgh0no7IaCO243Sa6OhPHPaTXU32cPVdJlK4tw==",
+  "fixed": "1i/8PQxo0onvkaOanqPYrN1CXKTFv1t8Mn9qygeBP/4828wCAHn6Qc4bA9LNuhQPBQVb/wzldy8OySO/aWppyPfqdZNVThK8W0KRSyyEWij/yWbyfNXJ0SGfgOJjgTtKk0SD9r9AGV1sB2zqCuirkvTHYfR1FVwnARleHukfKOun2p0Bi2vJx5bB4sBQbGtrQbU+MQMfuUSa8ZSMzpdhTGyYVLRDLOTVtRRgDTuqcJlEfqVEmDZJf5hpivv2O7Ng"
+}

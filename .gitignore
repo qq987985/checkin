@@ -4,3 +4,4 @@ __pycache__/
 .env
 data/
 last_success.txt
+.venv/

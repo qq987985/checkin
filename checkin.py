@@ -1,6 +1,7 @@
 """多站点签到服务：python checkin.py，默认 http://127.0.0.1:8505。"""
 import hashlib
 from http.cookies import SimpleCookie
+from cookiecloud import CloudError, fetch_cookies, cookie_header, validate_config as validate_cloud
 import hmac
 import json
 import os
@@ -100,9 +101,9 @@ def validate_site(s):
         raise ValueError('请填写有效的 HTTP/HTTPS 签到接口 URL')
     if s.get('method') not in ('GET', 'POST', 'PUT', 'PATCH'):
         raise ValueError('不支持的请求方法')
-    if s.get('auth_type') not in ('none', 'cookie', 'bearer', 'api_key'):
+    if s.get('auth_type') not in ('none', 'cookie', 'cookiecloud', 'bearer', 'api_key'):
         raise ValueError('不支持的验证方式')
-    if s.get('auth_type') != 'none' and not s.get('secret'):
+    if s.get('auth_type') not in ('none', 'cookiecloud') and not s.get('secret'):
         raise ValueError('请填写 Cookie 或 Token')
     s['times'] = sorted(set(t.strip() for t in s.get('times', [])))
     if not s['times'] or any(not re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d', t) for t in s['times']):
@@ -132,6 +133,10 @@ def public_config():
             s['has_headers'] = bool(s.pop('headers', {}))
             s['has_body'] = bool(s.pop('body', ''))
             # URLs may contain query credentials; management page is authenticated.
+        cloud = result.get('cookiecloud', {})
+        cloud['has_uuid'] = bool(cloud.pop('uuid', ''))
+        cloud['has_password'] = bool(cloud.pop('password', ''))
+        result['cookiecloud'] = cloud
         result['has_bark'] = bool(result.pop('bark_url', ''))
         return result
 
@@ -173,6 +178,12 @@ def execute(site):
     if key:
         headers = {k: v for k, v in headers.items() if k.lower() != key.lower()}
         headers[key] = ('Bearer ' if auth == 'bearer' else '') + site['secret']
+    if auth == 'cookiecloud':
+        with LOCK:
+            cloud = dict(CONFIG.get('cookiecloud', {}))
+        value = cookie_header(fetch_cookies(cloud), site['url'])
+        headers = {k: v for k, v in headers.items() if k.lower() != 'cookie'}
+        headers['Cookie'] = value
     body = None
     if site.get('body_type') != 'none':
         body = site.get('body', '').encode()
@@ -214,6 +225,8 @@ def run_site(site_id):
             result, status = execute(site)
             message = {'success': '签到成功', 'failed': '签到失败，请检查凭据和结果规则', 'unknown': '响应未匹配成功规则，请人工确认'}[result]
             message += f'（HTTP {status}）'
+        except CloudError as error:
+            result, status, message = 'failed', None, str(error)
         except Exception:
             result, status, message = 'failed', None, '请求异常，请检查接口地址、网络或证书'
         with LOCK:
@@ -402,6 +415,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, {'ok': True})
             if path == '/api/run':
                 return self.respond(200, run_site(payload['id']))
+            if path in ('/api/cookiecloud', '/api/cookiecloud/test'):
+                with LOCK:
+                    cloud = validate_cloud(payload, CONFIG.get('cookiecloud', {})) if not payload.get('clear') else None
+                if path.endswith('/test'):
+                    try:
+                        data = fetch_cookies(cloud or {})
+                        domains = sum(isinstance(items, list) and bool(items) for items in data.values())
+                        return self.respond(200, {'ok': True, 'message': f'连接及本机解密成功，共 {domains} 个域名分组；未发送签到请求。'})
+                    except CloudError as error:
+                        return self.respond(400, {'error': str(error)})
+                with LOCK:
+                    if cloud is None:
+                        CONFIG.pop('cookiecloud', None)
+                    else:
+                        CONFIG['cookiecloud'] = cloud
+                    write_json(DATA / 'config.json', CONFIG)
+                return self.respond(200, {'ok': True})
             if path == '/api/settings':
                 bark = payload.get('bark_url')
                 with LOCK:
@@ -413,6 +443,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, {'ok': True})
             self.respond(404, {'error': '未找到'})
         except (ValueError, KeyError, TypeError):
+            if path.startswith('/api/cookiecloud'):
+                return self.respond(400, {'error': '请检查 CookieCloud 服务器地址、UUID、端对端密码及加密算法；编辑已保存凭据时可留空保留'})
             self.respond(400, {'error': '配置无效，请检查 URL、验证凭据、时间和 JSON 格式'})
 
 if __name__ == '__main__':

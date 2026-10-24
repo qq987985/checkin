@@ -3,9 +3,9 @@
 一个可以在网页中配置的多站点自动签到工具。无需把 Cookie 写进 Docker Compose：启动容器后，在管理页面填写签到接口、登录凭据、每日次数与时间即可。
 
 - **仓库**：[qq987985/checkin](https://github.com/qq987985/checkin)
-- **镜像**：`ghcr.io/qq987985/checkin:latest`，固定版本 `ghcr.io/qq987985/checkin:2.1.3`
+- **镜像**：`ghcr.io/qq987985/checkin:latest`，固定版本 `ghcr.io/qq987985/checkin:2.2.0`
 - **平台**：Linux amd64 / arm64，适用于对应架构的服务器、NAS 和 Docker Desktop。
-- **运行依赖**：Python 标准库，无第三方 Python 依赖。
+- **运行依赖**：Python 3.10+，CookieCloud 本机 AES 解密使用 PyCryptodome（Docker 镜像已内置）。
 
 > 这是通用 HTTP 签到工具，并非所有平台的开箱即用适配合集。金山灵犀 / WPS、豆包 App 等都需要填写自己的实际签到请求。当前没有经过真实验证的豆包 App 签到适配器，不处理动态签名、设备校验或验证码。
 
@@ -114,6 +114,25 @@ services:
         max-file: "3"
 ```
 
+## CookieCloud 自动获取 Cookie
+
+浏览器安装 CookieCloud 扩展并配置好上传服务器后，可以让签到工具在每次执行前自动获取对应站点的最新 Cookie。
+
+1. 在本工具页面顶部点击 **CookieCloud 设置**。
+2. 填入与扩展完全相同的 **服务器地址**、**用户 KEY · UUID**、**端对端加密密码**。服务器地址包含自定义路径时保留该路径，如 `https://cookiecloud.example.com/cookiecloud`，不要追加 `/get/UUID`。
+3. 加密算法通常保持「自动识别」，支持扩展的 **CryptoJS（动态 IV）** 和 **AES-128-CBC（固定 IV）**。必要时可手动选择。
+4. 扩展工作模式选择「上传到服务器」，浏览器登录目标网站后点击「手动同步」。
+5. 在本工具点击「测试连接」，确认下载和本机解密正常。测试只返回域名分组数量，不返回 Cookie 明文，也不发送签到请求；测试不会保存未提交的设置。
+6. 点击「保存设置」。打开需要自动同步的站点，将验证方式选为 **CookieCloud（签到前自动获取 Cookie）**，保存站点即可。
+
+CookieCloud 配置全局保存一次，每个站点单独选择是否使用。每次实际签到前下载最新密文并在本机解密，端对端密码不发送到 CookieCloud 服务器；不会自动导入浏览器扩展配置，需要在本页手动填写上述三项。UUID 和密码在页面中不回显，编辑时留空保留，支持清除配置。
+
+匹配严格依据**签到接口 URL**：主机专属 Cookie 仅匹配该主机；域 Cookie 可匹配其子域，同时检查路径、HTTPS 和过期时间。不会将其他网站 Cookie 混入；不匹配的 Cookie 会被过滤，暂不支持需要浏览器上下文的分区 Cookie。全局获取失败、解密失败或找不到有效 Cookie 时，该次签到记为失败，不回退使用旧 Cookie。选择 CookieCloud 时会替换手工设置的 Cookie 请求头，其他不同名称的自定义请求头仍可使用。
+
+凭据保存在本机 `data/config.json`，与其他签到凭据一样按敏感数据备份。HTTP 服务器地址可用于既有部署，但建议使用 HTTPS。Cookie 过期后仍需在浏览器重新登录并上传；浏览器没有同步到的 Cookie、手机 App 凭据、签到接口 URL、请求方法、动态签名等不会自动获取。额外 Bearer / API Key 可在自定义请求头中配置，不从 LocalStorage 自动提取。
+
+算法对接参考 [CookieCloud 官方 Python 示例](https://github.com/easychen/CookieCloud/blob/main/examples/decrypt.py)。
+
 ## 网页配置签到
 
 点击「添加签到站点」，填写以下内容并保存：
@@ -123,7 +142,7 @@ services:
 | 站点名称 | 自己容易识别的名称，如金山灵犀 |
 | 请求方法 | 按实际请求选择 GET / POST / PUT / PATCH |
 | 签到接口 URL | 实际执行签到的接口，不能填写首页或签到页面地址 |
-| 验证方式 | Cookie、Bearer Token、API Key 或自定义请求头 |
+| 验证方式 | 手动 Cookie、CookieCloud 自动 Cookie、Bearer Token、API Key 或自定义请求头 |
 | 验证凭据 | 自己账号的 Cookie / Token；Bearer Token 不包含 `Bearer ` 前缀 |
 | API Key 请求头名称 | 按接口填写，例如 `X-API-Key`、`token` |
 | 每日成功签到次数 | 1–50，达到目标后停止当天执行 |
@@ -214,7 +233,7 @@ services:
 
 从 2.0 升级到 2.1 时，更新 Compose 和 `.env`，将旧 `ADMIN_TOKEN` 换为账号密码、域名及 Cookie 设置，保留原 `data/`。
 
-升级至 2.1.3 后，容器内外默认端口均改为 `8505`。如已有 `.env`，请将 `WEB_PORT` 改为 `8505`；Lucky 后端目标地址也同步改为 `http://签到主机地址:8505`。
+升级至 2.2.0 后，容器内外默认端口均改为 `8505`。如已有 `.env`，请将 `WEB_PORT` 改为 `8505`；Lucky 后端目标地址也同步改为 `http://签到主机地址:8505`。
 
 ## 更新和常用命令
 
@@ -231,7 +250,7 @@ docker compose logs -f --tail=100 checkin
 docker compose down
 ```
 
-如需固定版本，将镜像标签 `latest` 改为 `2.1.3`。
+如需固定版本，将镜像标签 `latest` 改为 `2.2.0`。
 
 ### 从 Lingxi-Check-in 迁移
 
@@ -249,7 +268,9 @@ Python 3.10+：
 ```bash
 git clone https://github.com/qq987985/checkin.git
 cd checkin
-TZ=Asia/Shanghai python3 checkin.py
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+TZ=Asia/Shanghai .venv/bin/python checkin.py
 ```
 
 打开 http://127.0.0.1:8505 。本机开发默认绑定回环地址，可免登录；对外监听应设置 `ADMIN_USERNAME` 和至少 12 位 `ADMIN_PASSWORD`。旧 `ADMIN_TOKEN` 仅在未启用账号时兼容，公网部署请迁移到账号模式。可通过 `HOST`、`PORT`、`DATA_DIR`、`TZ` 调整监听地址、端口、数据目录与时区。
@@ -263,8 +284,8 @@ docker build -t checkin:local .
 验证：
 
 ```bash
-python3 -m unittest discover -s tests -v
-python3 -m py_compile checkin.py
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m py_compile checkin.py cookiecloud.py
 node --check static/app.js
 ADMIN_USERNAME=test ADMIN_PASSWORD=compose-test-password docker compose config --quiet
 ```

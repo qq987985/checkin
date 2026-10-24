@@ -6,3 +6,5 @@
 body.locked>aside,body.locked>main{visibility:hidden}body.locked{background:#edf4ef}#access-dialog{width:410px;padding:32px}#access-dialog h2{font-size:24px;margin-top:15px}#access-dialog .login-intro{margin:12px 0 24px}#access-dialog .modal-actions button{width:100%}
 
 #method-hint{margin-bottom:10px}.url-help code{overflow-wrap:anywhere;font-size:11px}
+
+header{height:auto;min-height:82px;flex-wrap:wrap;gap:10px;padding:14px 0}header .actions{flex-wrap:wrap}#cloud-dialog{width:560px}#cloud-dialog .help{margin:0 0 15px}@media(max-width:650px){header{min-height:54px}header .actions button{padding:8px;font-size:12px}}
